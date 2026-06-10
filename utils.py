@@ -75,5 +75,11 @@ def lab_to_rgb(L: torch.Tensor, ab: torch.Tensor) -> np.ndarray:
     ab_np = ab_np * 110.0
 
     lab = np.concatenate([L_np[:, :, np.newaxis], ab_np], axis=2).astype(np.float32)
-    rgb = skcolor.lab2rgb(lab)
+    # Clip Lab to valid ranges before conversion to avoid out-of-gamut warnings
+    lab[:, :, 0] = np.clip(lab[:, :, 0], 0.0, 100.0)
+    lab[:, :, 1:] = np.clip(lab[:, :, 1:], -128.0, 127.0)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        rgb = skcolor.lab2rgb(lab)
     return (np.clip(rgb, 0.0, 1.0) * 255).astype(np.uint8)
