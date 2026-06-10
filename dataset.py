@@ -26,6 +26,7 @@ def _collect_image_paths(root: str) -> List[Path]:
 
 def _build_train_transforms(image_size: int) -> A.Compose:
     return A.Compose([
+        A.SmallestMaxSize(max_size=image_size),
         A.RandomCrop(height=image_size, width=image_size),
         A.HorizontalFlip(p=0.5),
     ])
@@ -33,6 +34,7 @@ def _build_train_transforms(image_size: int) -> A.Compose:
 
 def _build_val_transforms(image_size: int) -> A.Compose:
     return A.Compose([
+        A.SmallestMaxSize(max_size=image_size),
         A.CenterCrop(height=image_size, width=image_size),
     ])
 
