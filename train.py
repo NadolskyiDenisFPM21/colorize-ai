@@ -24,20 +24,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image_size", type=int, default=cfg.IMAGE_SIZE)
     parser.add_argument("--lr", type=float, default=cfg.LR)
     parser.add_argument("--lambda_l1", type=float, default=cfg.LAMBDA_L1)
+    parser.add_argument("--num_workers", type=int, default=cfg.NUM_WORKERS)
+    parser.add_argument("--max_samples", type=int, default=None, help="Limit dataset size (useful for quick tests)")
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
     return parser.parse_args()
 
 
-def build_loaders(data_dir: str, batch_size: int, image_size: int = cfg.IMAGE_SIZE) -> tuple[DataLoader, DataLoader]:
-    train_ds = ColorizationDataset(data_dir, split="train", image_size=image_size)
+def build_loaders(
+    data_dir: str,
+    batch_size: int,
+    image_size: int = cfg.IMAGE_SIZE,
+    num_workers: int = cfg.NUM_WORKERS,
+    max_samples: int = None,
+) -> tuple[DataLoader, DataLoader]:
+    train_ds = ColorizationDataset(data_dir, split="train", image_size=image_size, max_samples=max_samples)
     val_ds = ColorizationDataset(data_dir, split="val", image_size=image_size)
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True,
-        num_workers=cfg.NUM_WORKERS, pin_memory=True, drop_last=True,
+        num_workers=num_workers, pin_memory=True, drop_last=True, persistent_workers=num_workers > 0,
     )
     val_loader = DataLoader(
         val_ds, batch_size=batch_size, shuffle=False,
-        num_workers=cfg.NUM_WORKERS, pin_memory=True, drop_last=False,
+        num_workers=num_workers, pin_memory=True, drop_last=False, persistent_workers=num_workers > 0,
     )
     return train_loader, val_loader
 
@@ -159,7 +167,7 @@ def main():
                 load_checkpoint(latest_disc, disc, opt_disc, device=device)
             print(f"Resumed from epoch {start_epoch} (latest checkpoint)")
 
-    train_loader, val_loader = build_loaders(args.data_dir, args.batch_size, args.image_size)
+    train_loader, val_loader = build_loaders(args.data_dir, args.batch_size, args.image_size, args.num_workers, args.max_samples)
     writer = SummaryWriter(log_dir=cfg.LOG_DIR)
 
     for epoch in range(start_epoch + 1, args.epochs + 1):

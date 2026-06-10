@@ -52,6 +52,7 @@ class ColorizationDataset(Dataset):
         split: str = "train",
         image_size: int = 256,
         val_fraction: float = 0.1,
+        max_samples: Optional[int] = None,
     ):
         if split not in ("train", "val"):
             raise ValueError(f"split must be 'train' or 'val', got '{split}'")
@@ -63,6 +64,8 @@ class ColorizationDataset(Dataset):
             self.transform = _build_val_transforms(image_size)
         else:
             self.paths = all_paths[n_val:]
+            if max_samples is not None:
+                self.paths = self.paths[:max_samples]
             self.transform = _build_train_transforms(image_size)
 
         self.image_size = image_size
