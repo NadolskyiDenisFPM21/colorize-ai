@@ -4,6 +4,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+from torch.amp import autocast, GradScaler
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
@@ -62,40 +63,45 @@ def train_one_epoch(
     device: str,
     writer: SummaryWriter,
     epoch: int,
+    scaler_gen: GradScaler,
+    scaler_disc: GradScaler,
 ) -> tuple[float, float]:
     gen.train()
     disc.train()
+    use_amp = device == "cuda"
 
     meter_d = AverageMeter()
     meter_g = AverageMeter()
 
     for L, ab_real in tqdm(loader, desc=f"Epoch {epoch}", leave=False):
-        L = L.to(device)
-        ab_real = ab_real.to(device)
+        L = L.to(device, non_blocking=True)
+        ab_real = ab_real.to(device, non_blocking=True)
         bsz = L.size(0)
 
         # --- Discriminator step ---
-        ab_fake = gen(L).detach()
-        real_pred = disc(L, ab_real)
-        fake_pred = disc(L, ab_fake)
-        loss_d_real = criterion_gan(real_pred, torch.ones_like(real_pred))
-        loss_d_fake = criterion_gan(fake_pred, torch.zeros_like(fake_pred))
-        loss_d = (loss_d_real + loss_d_fake) * 0.5
+        with autocast("cuda", enabled=use_amp):
+            ab_fake = gen(L).detach()
+            real_pred = disc(L, ab_real)
+            fake_pred = disc(L, ab_fake)
+            loss_d = (criterion_gan(real_pred, torch.ones_like(real_pred)) +
+                      criterion_gan(fake_pred, torch.zeros_like(fake_pred))) * 0.5
 
         opt_disc.zero_grad()
-        loss_d.backward()
-        opt_disc.step()
+        scaler_disc.scale(loss_d).backward()
+        scaler_disc.step(opt_disc)
+        scaler_disc.update()
 
         # --- Generator step ---
-        ab_fake = gen(L)
-        fake_pred = disc(L, ab_fake)
-        loss_g_gan = criterion_gan(fake_pred, torch.ones_like(fake_pred))
-        loss_g_l1 = criterion_l1(ab_fake, ab_real) * lambda_l1
-        loss_g = loss_g_gan + loss_g_l1
+        with autocast("cuda", enabled=use_amp):
+            ab_fake = gen(L)
+            fake_pred = disc(L, ab_fake)
+            loss_g = (criterion_gan(fake_pred, torch.ones_like(fake_pred)) +
+                      criterion_l1(ab_fake, ab_real) * lambda_l1)
 
         opt_gen.zero_grad()
-        loss_g.backward()
-        opt_gen.step()
+        scaler_gen.scale(loss_g).backward()
+        scaler_gen.step(opt_gen)
+        scaler_gen.update()
 
         meter_d.update(loss_d.item(), bsz)
         meter_g.update(loss_g.item(), bsz)
@@ -150,6 +156,8 @@ def main():
 
     criterion_gan = nn.BCEWithLogitsLoss()
     criterion_l1 = nn.L1Loss()
+    scaler_gen = GradScaler("cuda", enabled=device == "cuda")
+    scaler_disc = GradScaler("cuda", enabled=device == "cuda")
 
     start_epoch = 0
     if args.resume:
@@ -174,6 +182,7 @@ def main():
         loss_d, loss_g = train_one_epoch(
             gen, disc, train_loader, opt_gen, opt_disc,
             criterion_gan, criterion_l1, args.lambda_l1, device, writer, epoch,
+            scaler_gen, scaler_disc,
         )
         print(f"Epoch [{epoch}/{args.epochs}]  D_loss: {loss_d:.4f}  G_loss: {loss_g:.4f}")
 

@@ -2,9 +2,8 @@ import os
 from pathlib import Path
 from typing import Tuple, Optional, List
 
+import cv2
 import numpy as np
-from PIL import Image
-import skimage.color as skcolor
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import torch
@@ -74,9 +73,14 @@ class ColorizationDataset(Dataset):
         return len(self.paths)
 
     def _load_lab(self, path: Path) -> np.ndarray:
-        img = Image.open(path).convert("RGB")
-        img_np = np.array(img, dtype=np.float32) / 255.0
-        lab = skcolor.rgb2lab(img_np).astype(np.float32)
+        bgr = cv2.imread(str(path))
+        if bgr is None:
+            raise RuntimeError(f"Failed to read image: {path}")
+        lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+        # cv2 LAB: L in [0,255], a/b in [0,255] (shifted). Remap to standard ranges.
+        lab[:, :, 0] = lab[:, :, 0] * (100.0 / 255.0)          # L: [0, 100]
+        lab[:, :, 1] = lab[:, :, 1] - 128.0                     # a: [-128, 127]
+        lab[:, :, 2] = lab[:, :, 2] - 128.0                     # b: [-128, 127]
         return lab
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
