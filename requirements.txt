@@ -1,0 +1,9 @@
+torch
+torchvision
+Pillow
+numpy
+tqdm
+tensorboard
+albumentations
+opencv-python-headless
+scikit-image
