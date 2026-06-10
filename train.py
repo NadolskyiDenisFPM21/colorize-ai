@@ -21,13 +21,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data_dir", type=str, default=cfg.DATA_DIR)
     parser.add_argument("--epochs", type=int, default=cfg.NUM_EPOCHS)
     parser.add_argument("--batch_size", type=int, default=cfg.BATCH_SIZE)
+    parser.add_argument("--image_size", type=int, default=cfg.IMAGE_SIZE)
+    parser.add_argument("--lr", type=float, default=cfg.LR)
+    parser.add_argument("--lambda_l1", type=float, default=cfg.LAMBDA_L1)
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
     return parser.parse_args()
 
 
-def build_loaders(data_dir: str, batch_size: int) -> tuple[DataLoader, DataLoader]:
-    train_ds = ColorizationDataset(data_dir, split="train", image_size=cfg.IMAGE_SIZE)
-    val_ds = ColorizationDataset(data_dir, split="val", image_size=cfg.IMAGE_SIZE)
+def build_loaders(data_dir: str, batch_size: int, image_size: int = cfg.IMAGE_SIZE) -> tuple[DataLoader, DataLoader]:
+    train_ds = ColorizationDataset(data_dir, split="train", image_size=image_size)
+    val_ds = ColorizationDataset(data_dir, split="val", image_size=image_size)
     train_loader = DataLoader(
         train_ds, batch_size=batch_size, shuffle=True,
         num_workers=cfg.NUM_WORKERS, pin_memory=True, drop_last=True,
@@ -47,6 +50,7 @@ def train_one_epoch(
     opt_disc: torch.optim.Optimizer,
     criterion_gan: nn.BCEWithLogitsLoss,
     criterion_l1: nn.L1Loss,
+    lambda_l1: float,
     device: str,
     writer: SummaryWriter,
     epoch: int,
@@ -78,7 +82,7 @@ def train_one_epoch(
         ab_fake = gen(L)
         fake_pred = disc(L, ab_fake)
         loss_g_gan = criterion_gan(fake_pred, torch.ones_like(fake_pred))
-        loss_g_l1 = criterion_l1(ab_fake, ab_real) * cfg.LAMBDA_L1
+        loss_g_l1 = criterion_l1(ab_fake, ab_real) * lambda_l1
         loss_g = loss_g_gan + loss_g_l1
 
         opt_gen.zero_grad()
@@ -133,8 +137,8 @@ def main():
     gen = UNetGenerator().to(device)
     disc = PatchGANDiscriminator().to(device)
 
-    opt_gen = torch.optim.Adam(gen.parameters(), lr=cfg.LR, betas=(0.5, 0.999))
-    opt_disc = torch.optim.Adam(disc.parameters(), lr=cfg.LR, betas=(0.5, 0.999))
+    opt_gen = torch.optim.Adam(gen.parameters(), lr=args.lr, betas=(0.5, 0.999))
+    opt_disc = torch.optim.Adam(disc.parameters(), lr=args.lr, betas=(0.5, 0.999))
 
     criterion_gan = nn.BCEWithLogitsLoss()
     criterion_l1 = nn.L1Loss()
@@ -155,13 +159,13 @@ def main():
                 load_checkpoint(latest_disc, disc, opt_disc, device=device)
             print(f"Resumed from epoch {start_epoch} (latest checkpoint)")
 
-    train_loader, val_loader = build_loaders(args.data_dir, args.batch_size)
+    train_loader, val_loader = build_loaders(args.data_dir, args.batch_size, args.image_size)
     writer = SummaryWriter(log_dir=cfg.LOG_DIR)
 
     for epoch in range(start_epoch + 1, args.epochs + 1):
         loss_d, loss_g = train_one_epoch(
             gen, disc, train_loader, opt_gen, opt_disc,
-            criterion_gan, criterion_l1, device, writer, epoch,
+            criterion_gan, criterion_l1, args.lambda_l1, device, writer, epoch,
         )
         print(f"Epoch [{epoch}/{args.epochs}]  D_loss: {loss_d:.4f}  G_loss: {loss_g:.4f}")
 
